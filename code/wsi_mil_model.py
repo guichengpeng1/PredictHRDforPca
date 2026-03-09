@@ -3,6 +3,33 @@ import torch
 import torch.nn as nn
 
 
+def build_torchvision_resnet(backbone_name: str, pretrained: bool):
+    from torchvision.models import (
+        ResNet18_Weights,
+        ResNet34_Weights,
+        ResNet50_Weights,
+        resnet18,
+        resnet34,
+        resnet50,
+    )
+
+    builders = {
+        "tv_resnet18": (resnet18, ResNet18_Weights.DEFAULT),
+        "tv_resnet34": (resnet34, ResNet34_Weights.DEFAULT),
+        "tv_resnet50": (resnet50, ResNet50_Weights.DEFAULT),
+    }
+    if backbone_name not in builders:
+        raise ValueError(f"Unsupported torchvision backbone: {backbone_name}")
+
+    builder, default_weights = builders[backbone_name]
+    weights = default_weights if pretrained else None
+    model = builder(weights=weights)
+    num_features = int(model.fc.in_features)
+    model.fc = nn.Identity()
+    model.num_features = num_features
+    return model
+
+
 class GatedAttentionPool(nn.Module):
     def __init__(self, embed_dim: int, attention_dim: int = 256, dropout: float = 0.25):
         super().__init__()
@@ -27,11 +54,14 @@ class WSIAttentionMIL(nn.Module):
         dropout: float = 0.25,
     ) -> None:
         super().__init__()
-        self.backbone = timm.create_model(
-            backbone_name,
-            pretrained=pretrained,
-            num_classes=0,
-        )
+        if backbone_name.startswith("tv_"):
+            self.backbone = build_torchvision_resnet(backbone_name, pretrained)
+        else:
+            self.backbone = timm.create_model(
+                backbone_name,
+                pretrained=pretrained,
+                num_classes=0,
+            )
         self.embed_dim = int(getattr(self.backbone, "num_features"))
         self.pool = GatedAttentionPool(self.embed_dim, dropout=dropout)
         self.head = nn.Sequential(

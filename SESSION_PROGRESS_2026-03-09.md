@@ -463,3 +463,53 @@ Workspace: /Users/gui/Desktop/项目归并_2026-03-07/国自然/2025年度粤港
 - Most practical next candidate:
   - `resnet50` once pretrained weights are fully cached locally
   - then re-test on a weak fold first before launching another full CV sweep
+
+## Stronger-backbone validation on a weak fold (2026-03-10)
+
+### Problem encountered and fix
+- `timm` + Hugging Face download path for `resnet50.a1_in1k` stalled repeatedly.
+- Verified that `torchvision` could fetch `resnet50` weights quickly from the PyTorch CDN.
+- Added explicit torchvision backbone support in `code/wsi_mil_model.py`:
+  - `tv_resnet18`
+  - `tv_resnet34`
+  - `tv_resnet50`
+
+### Validation run
+- Run dir: `outputs/tcga_wsi_backbone_probe_fold2_tv_resnet50_ep3`
+- Fold: 2
+- Backbone: `tv_resnet50`
+- Other settings kept close to the previous weak-fold baseline:
+  - 16 tiles per slide
+  - 3 epochs
+  - pretrained weights
+  - AMP
+
+### Results on fold 2
+- Epoch 1:
+  - val_auc: 0.9013
+  - val_ap: 0.1667
+  - val_mae: 10.0090
+- Epoch 2:
+  - val_auc: 0.4276
+  - val_ap: 0.0329
+  - val_mae: 10.2739
+- Epoch 3:
+  - val_auc: 0.8092
+  - val_ap: 0.1114
+  - val_mae: 10.5905
+
+### Direct comparison against the previous fold-2 baseline
+- Previous `resnet18` best on fold 2:
+  - val_auc: 0.2632
+  - val_ap: 0.0253
+  - val_mae: 9.2153
+- New `tv_resnet50` best on fold 2:
+  - val_auc: 0.9013
+  - val_ap: 0.1667
+  - val_mae: 10.0090
+
+### Decision after the weak-fold backbone probe
+- For the classification objective, stronger backbone is clearly the right next direction.
+- The gain is large enough that a full CV rerun with `tv_resnet50` is now justified.
+- Important caveat:
+  - HRD score regression MAE got worse on this weak-fold probe, so future runs should track classification and regression separately rather than assuming both improve together.
