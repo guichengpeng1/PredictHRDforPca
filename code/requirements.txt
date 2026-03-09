@@ -1,0 +1,11 @@
+torch
+torchvision
+timm
+openslide-python
+pandas
+scikit-learn
+numpy
+matplotlib
+seaborn
+pillow
+# uninet 需根据官方实现补充相关依赖
