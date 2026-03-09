@@ -244,3 +244,58 @@ Workspace: /Users/gui/Desktop/项目归并_2026-03-07/国自然/2025年度粤港
 ### Immediate next target
 - Run a full fold baseline on TCGA with the new MIL pipeline and collect real held-out metrics.
 - After that, decide whether unlabeled TCIA pathology slides should be used for pseudo-labeling or external inference only.
+
+## First reportable held-out TCGA baseline (2026-03-09 night)
+
+### Run identity
+- Output dir: `outputs/tcga_wsi_mil_report_fold0_pretrained_nw4`
+- Data:
+  - 391 labeled TCGA WSI cases total
+  - fold setting: 5-fold stratified, reported run = fold 0
+- Training configuration:
+  - backbone: `resnet18`
+  - pretrained: yes
+  - pooling: attention MIL
+  - magnification: 10x
+  - tiles per slide: 8
+  - tile size: 224
+  - batch size: 2
+  - AMP: yes
+  - workers: 4
+  - device: RTX 5090
+  - epochs: 3
+
+### Held-out validation metrics
+- Epoch 1:
+  - val_auc: 0.4675
+  - val_ap: 0.0476
+  - val_mae: 7.3324
+- Epoch 2:
+  - val_auc: 0.4935
+  - val_ap: 0.0967
+  - val_mae: 6.8220
+- Epoch 3:
+  - val_auc: 0.4805
+  - val_ap: 0.0963
+  - val_mae: 6.6581
+
+### Current best checkpoint under the present selection rule
+- Best checkpoint file: `outputs/tcga_wsi_mil_report_fold0_pretrained_nw4/best_model.pt`
+- Selection rule used in training script:
+  - save by highest validation AUC
+- Therefore current best epoch:
+  - epoch 2
+  - best val_auc: 0.4935
+  - corresponding val_ap: 0.0967
+  - corresponding val_mae: 6.8220
+
+### Interpretation
+- The pipeline now has a real held-out baseline on the full TCGA labeled cohort.
+- Classification performance is still weak and not yet clinically or scientifically adequate.
+- Regression error improved across epochs, but HRD status discrimination remains close to random.
+- Most practical next upgrades:
+  - increase tiles per slide
+  - try stronger backbones such as `resnet50` or `convnext_tiny`
+  - run more epochs now that tile cache is already built
+  - test focal loss / class-balanced loss because only 10 positives exist
+  - compare 10x-only versus a stronger multi-scale variant
