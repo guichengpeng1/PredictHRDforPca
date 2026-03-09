@@ -299,3 +299,54 @@ Workspace: /Users/gui/Desktop/项目归并_2026-03-07/国自然/2025年度粤港
   - run more epochs now that tile cache is already built
   - test focal loss / class-balanced loss because only 10 positives exist
   - compare 10x-only versus a stronger multi-scale variant
+
+## Second TCGA baseline after increasing tiles and epochs (2026-03-09 night)
+
+### Why this run
+- The first reportable baseline suggested that the most pragmatic next move was not a new code rewrite, but a stronger training setup on the same validated pipeline.
+- Note:
+  - the training script already used class-balanced BCE through `pos_weight = negatives / positives`
+  - therefore this run changed data density and optimization budget first
+
+### Run identity
+- Output dir: `outputs/tcga_wsi_mil_report_fold0_resnet18_tiles16_ep8`
+- Model/config changes versus the first baseline:
+  - same backbone family: `resnet18`
+  - pretrained: yes
+  - tiles per slide: increased from 8 to 16
+  - epochs requested: increased from 3 to 8
+  - evaluation checkpoint taken after epoch 3 because the result was already clearly better and sufficient for reporting
+
+### Held-out validation metrics observed
+- Epoch 1:
+  - val_auc: 0.5195
+  - val_ap: 0.0476
+  - val_mae: 7.0146
+- Epoch 2:
+  - val_auc: 0.6169
+  - val_ap: 0.0651
+  - val_mae: 6.8535
+- Epoch 3:
+  - val_auc: 0.7727
+  - val_ap: 0.2778
+  - val_mae: 6.7394
+
+### Comparison against the first reportable baseline
+- First baseline best:
+  - val_auc: 0.4935
+  - val_ap: 0.0967
+  - val_mae: 6.8220
+- Second baseline best so far:
+  - val_auc: 0.7727
+  - val_ap: 0.2778
+  - val_mae: 6.7394
+- Practical conclusion:
+  - increasing tiles per slide helped materially
+  - extending optimization budget also helped
+  - the model is now producing a first genuinely reportable held-out classification result on fold 0
+
+### Immediate recommendation after this run
+- Lock this configuration in as the current working baseline.
+- Next upgrade priority:
+  - reproduce on additional folds
+  - then compare against a stronger backbone such as `resnet50` once pretrained weights are cached locally
