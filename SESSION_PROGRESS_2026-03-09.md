@@ -400,3 +400,66 @@ Workspace: /Users/gui/Desktop/项目归并_2026-03-07/国自然/2025年度粤港
 - Therefore the next engineering priority is still correct:
   - continue folds 3 and 4
   - then decide whether to improve robustness via stronger sampling, longer training, or architecture changes
+
+## Full 5-fold first-pass reproduction (2026-03-10 early morning)
+
+### Fold 3 first-pass result
+- Run dir: `outputs/tcga_wsi_mil_cv_resnet18_tiles16_ep8/fold3`
+- Best by validation AUC within 3 epochs:
+  - epoch 1
+  - val_auc: 0.2171
+  - val_ap: 0.0245
+  - val_mae: 8.1892
+
+### Fold 4 first-pass result
+- Run dir: `outputs/tcga_wsi_mil_cv_resnet18_tiles16_ep8/fold4`
+- Best by validation AUC within 3 epochs:
+  - epoch 3
+  - val_auc: 0.7171
+  - val_ap: 0.0670
+  - val_mae: 7.2834
+
+### Current 5-fold picture using best validation AUC per fold
+- Included runs:
+  - fold 0: `outputs/tcga_wsi_mil_report_fold0_resnet18_tiles16_ep8`
+  - fold 1: `outputs/tcga_wsi_mil_cv_resnet18_tiles16_ep8/fold1`
+  - fold 2: `outputs/tcga_wsi_mil_cv_resnet18_tiles16_ep8/fold2`
+  - fold 3: `outputs/tcga_wsi_mil_cv_resnet18_tiles16_ep8/fold3`
+  - fold 4: `outputs/tcga_wsi_mil_cv_resnet18_tiles16_ep8/fold4`
+- Summary:
+  - mean val_auc: 0.4980
+  - std val_auc: 0.2272
+  - mean val_ap: 0.0898
+  - std val_ap: 0.0954
+  - mean val_mae: 7.8760
+  - std val_mae: 0.8415
+
+### Stronger-sampling probe on a weak fold
+- Motivation:
+  - test whether poor folds are mainly caused by insufficient slide coverage
+- Probe run:
+  - dir: `outputs/tcga_wsi_sampling_probe_fold2_tiles32_ep3`
+  - fold: 2
+  - tiles per slide: increased from 16 to 32
+  - epochs: 3
+- Observed results:
+  - epoch 1: val_auc 0.2632, val_mae 8.8729
+  - epoch 2: val_auc 0.2105, val_mae 8.8024
+  - epoch 3: val_auc 0.1842, val_mae 8.7280
+- Comparison against the original fold-2 run:
+  - original best val_auc: 0.2632
+  - original best val_mae: 9.2153
+  - stronger-sampling conclusion:
+    - regression error improved somewhat
+    - classification AUC did not improve
+
+### Decision on the next optimization priority
+- Longer training is not the next priority:
+  - several weak folds peak at epoch 1 rather than improving steadily
+- Stronger sampling alone is also not the next priority:
+  - the 32-tile probe did not rescue fold-2 classification AUC
+- Therefore, among the originally discussed choices, the next most justified priority is:
+  - switch to a stronger backbone
+- Most practical next candidate:
+  - `resnet50` once pretrained weights are fully cached locally
+  - then re-test on a weak fold first before launching another full CV sweep
