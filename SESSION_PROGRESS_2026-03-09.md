@@ -350,3 +350,53 @@ Workspace: /Users/gui/Desktop/项目归并_2026-03-07/国自然/2025年度粤港
 - Next upgrade priority:
   - reproduce on additional folds
   - then compare against a stronger backbone such as `resnet50` once pretrained weights are cached locally
+
+## Cross-fold reproduction progress (2026-03-09 late night)
+
+### Automation added
+- `tools/run_tcga_cv_folds.sh`
+  - sequential fold runner for the improved baseline configuration
+- `code/summarize_tcga_cv.py`
+  - summarize best-per-fold metrics and report cross-fold mean/std
+
+### Fold 1 first-pass result
+- Run dir: `outputs/tcga_wsi_mil_cv_resnet18_tiles16_ep8/fold1`
+- Observed best by validation AUC within the first 3 epochs:
+  - epoch 3
+  - val_auc: 0.5197
+  - val_ap: 0.0543
+  - val_mae: 7.9528
+- Interpretation:
+  - much weaker than fold 0
+  - confirms that fold-to-fold variance is substantial
+
+### Fold 2 first-pass result
+- Run dir: `outputs/tcga_wsi_mil_cv_resnet18_tiles16_ep8/fold2`
+- Observed best by validation AUC within the 3-epoch quick pass:
+  - epoch 1
+  - val_auc: 0.2632
+  - val_ap: 0.0253
+  - val_mae: 9.2153
+- Interpretation:
+  - this fold is currently poor
+  - the current configuration is not yet stable enough to claim robust generalization across folds
+
+### Current 3-fold picture using best validation AUC per fold
+- Included runs:
+  - fold 0: `outputs/tcga_wsi_mil_report_fold0_resnet18_tiles16_ep8`
+  - fold 1: `outputs/tcga_wsi_mil_cv_resnet18_tiles16_ep8/fold1`
+  - fold 2: `outputs/tcga_wsi_mil_cv_resnet18_tiles16_ep8/fold2`
+- Summary:
+  - mean val_auc: 0.5185
+  - std val_auc: 0.2080
+  - mean val_ap: 0.1192
+  - std val_ap: 0.1128
+  - mean val_mae: 7.9692
+  - std val_mae: 1.0109
+
+### Practical conclusion after 3 folds
+- The improved setup is clearly better than the original weak baseline on some folds.
+- However, the cross-fold variance is still too large to treat the fold-0 high score as a stable result.
+- Therefore the next engineering priority is still correct:
+  - continue folds 3 and 4
+  - then decide whether to improve robustness via stronger sampling, longer training, or architecture changes
