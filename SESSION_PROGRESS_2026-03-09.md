@@ -537,3 +537,66 @@ Workspace: /Users/gui/Desktop/项目归并_2026-03-07/国自然/2025年度粤港
 - Status at launch check:
   - fold 0 had started successfully
   - output directory and metrics/config files were being created normally
+
+## Full tv_resnet50 CV result (2026-03-10)
+
+### Run completion
+- Output root: `outputs/tcga_wsi_cv_tv_resnet50_ep3`
+- Status: completed for folds 0-4
+- Selection rule:
+  - best validation AUC per fold
+
+### Best fold-wise classification results
+- fold 0:
+  - best epoch: 1
+  - val_auc: 0.3312
+  - val_ap: 0.0276
+  - val_mae: 7.6756
+- fold 1:
+  - best epoch: 3
+  - val_auc: 0.3618
+  - val_ap: 0.0301
+  - val_mae: 8.8467
+- fold 2:
+  - best epoch: 2
+  - val_auc: 0.8487
+  - val_ap: 0.1181
+  - val_mae: 10.0768
+- fold 3:
+  - best epoch: 1
+  - val_auc: 0.8882
+  - val_ap: 0.3056
+  - val_mae: 8.8670
+- fold 4:
+  - best epoch: 3
+  - val_auc: 0.9474
+  - val_ap: 0.2679
+  - val_mae: 7.1918
+
+### 5-fold summary for tv_resnet50
+- mean val_auc: 0.6754
+- std val_auc: 0.2706
+- mean val_ap: 0.1498
+- std val_ap: 0.1170
+- mean val_mae: 8.5316
+- std val_mae: 1.0126
+
+### Comparison against the previous 5-fold resnet18 baseline
+- Previous resnet18:
+  - mean val_auc: 0.4980
+  - std val_auc: 0.2272
+  - mean val_ap: 0.0898
+  - mean val_mae: 7.8760
+- New tv_resnet50:
+  - mean val_auc: 0.6754
+  - std val_auc: 0.2706
+  - mean val_ap: 0.1498
+  - mean val_mae: 8.5316
+
+### Current conclusion
+- `tv_resnet50` should be fixed as the classification backbone going forward.
+- Classification improved materially over the resnet18 5-fold baseline.
+- Regression MAE worsened, so classification and regression should no longer be treated as if they were optimized by the same default setting.
+- The next code/training step should be:
+  - task-specific training mode (`classification`, `regression`, `multitask`)
+  - then a longer classification-focused tv_resnet50 run
