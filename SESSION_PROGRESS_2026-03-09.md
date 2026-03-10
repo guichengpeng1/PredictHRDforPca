@@ -600,3 +600,65 @@ Workspace: /Users/gui/Desktop/项目归并_2026-03-07/国自然/2025年度粤港
 - The next code/training step should be:
   - task-specific training mode (`classification`, `regression`, `multitask`)
   - then a longer classification-focused tv_resnet50 run
+
+## Task-aware training mode and classification-only validation (2026-03-10)
+
+### Code change
+- Updated `code/train_tcga_wsi_mil.py` to support:
+  - `--task multitask|classification|regression`
+  - `--selection-metric auto|val_auc|val_ap|val_mae|val_loss`
+- Training behavior is now task-aware:
+  - classification-only:
+    - optimize only status BCE loss
+    - select checkpoint by validation AUC by default
+    - regression metrics are recorded as `nan`
+  - regression-only:
+    - optimize only score MSE loss
+    - select checkpoint by validation MAE by default
+  - multitask:
+    - preserve the previous combined setup
+
+### Classification-only backbone validation
+- Run dir: `outputs/tcga_wsi_cls_only_tv_resnet50_fold2_ep6`
+- Fold: 2
+- Backbone: `tv_resnet50`
+- Task: `classification`
+- Epochs: `6`
+- Tiles per slide: `16`
+
+### Classification-only results on fold 2
+- Epoch 1:
+  - val_auc: 0.5855
+  - val_ap: 0.0602
+- Epoch 2:
+  - val_auc: 0.8355
+  - val_ap: 0.1043
+- Epoch 3:
+  - val_auc: 0.9145
+  - val_ap: 0.2436
+- Epoch 4:
+  - val_auc: 0.9605
+  - val_ap: 0.3929
+- Epoch 5:
+  - val_auc: 0.5132
+  - val_ap: 0.0770
+- Epoch 6:
+  - val_auc: 0.5592
+  - val_ap: 0.2647
+
+### Comparison against tv_resnet50 multitask on the same fold
+- Previous multitask `tv_resnet50` best on fold 2:
+  - val_auc: 0.9013
+  - val_ap: 0.1667
+- New classification-only `tv_resnet50` best on fold 2:
+  - val_auc: 0.9605
+  - val_ap: 0.3929
+
+### Decision after classification-only validation
+- `tv_resnet50 + classification-only` is now the strongest validated setup for the HRD status objective.
+- The next default for classification experiments should be:
+  - backbone: `tv_resnet50`
+  - task: `classification`
+  - selection metric: `val_auc`
+- The next large experiment should therefore be:
+  - rerun full CV in classification-only mode

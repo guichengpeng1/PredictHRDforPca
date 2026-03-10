@@ -65,6 +65,23 @@ def safe_ap(y_true, y_score) -> float:
     return float(average_precision_score(y_true, y_score))
 
 
+def determine_selection_metric(task: str, selection_metric: str) -> str:
+    if selection_metric != "auto":
+        return selection_metric
+    if task == "regression":
+        return "val_mae"
+    return "val_auc"
+
+
+def metric_sort_value(metric_name: str, metrics: dict) -> float:
+    value = metrics[metric_name]
+    if np.isnan(value):
+        return float("-inf") if metric_name not in {"val_mae", "val_loss"} else float("inf")
+    if metric_name in {"val_mae", "val_loss"}:
+        return -float(value)
+    return float(value)
+
+
 def run_epoch(
     model,
     loader,
@@ -75,6 +92,7 @@ def run_epoch(
     alpha: float,
     beta: float,
     amp_enabled: bool,
+    task: str,
 ):
     train_mode = optimizer is not None
     model.train(mode=train_mode)
@@ -99,9 +117,14 @@ def run_epoch(
         )
         with autocast_context:
             outputs = model(bags)
-            score_loss = criterion_score(outputs["score"], hrd_score)
-            status_loss = criterion_status(outputs["status_logits"], hrd_status)
-            loss = alpha * score_loss + beta * status_loss
+            loss_terms = []
+            if task in {"multitask", "regression"}:
+                score_loss = criterion_score(outputs["score"], hrd_score)
+                loss_terms.append(alpha * score_loss)
+            if task in {"multitask", "classification"}:
+                status_loss = criterion_status(outputs["status_logits"], hrd_status)
+                loss_terms.append(beta * status_loss)
+            loss = sum(loss_terms)
 
         if train_mode:
             scaler.scale(loss).backward()
@@ -124,9 +147,15 @@ def run_epoch(
 
     metrics = {
         "loss": total_loss / max(total_count, 1),
-        "mae": float(mean_absolute_error(score_true, score_pred)),
-        "auc": safe_auc(status_true, status_pred),
-        "ap": safe_ap(status_true, status_pred),
+        "mae": float(mean_absolute_error(score_true, score_pred))
+        if task in {"multitask", "regression"}
+        else float("nan"),
+        "auc": safe_auc(status_true, status_pred)
+        if task in {"multitask", "classification"}
+        else float("nan"),
+        "ap": safe_ap(status_true, status_pred)
+        if task in {"multitask", "classification"}
+        else float("nan"),
     }
     return metrics
 
@@ -182,6 +211,18 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--alpha", type=float, default=1.0)
     parser.add_argument("--beta", type=float, default=1.0)
+    parser.add_argument(
+        "--task",
+        type=str,
+        default="multitask",
+        choices=["multitask", "classification", "regression"],
+    )
+    parser.add_argument(
+        "--selection-metric",
+        type=str,
+        default="auto",
+        choices=["auto", "val_auc", "val_ap", "val_mae", "val_loss"],
+    )
     parser.add_argument("--cache-dir", type=Path, default=Path("outputs/tile_cache"))
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument("--amp", action="store_true")
@@ -276,6 +317,7 @@ def main() -> None:
         device=device,
     )
     criterion_status = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    selection_metric = determine_selection_metric(args.task, args.selection_metric)
 
     config_path = args.output_dir / "config.json"
     with config_path.open("w", encoding="utf-8") as handle:
@@ -300,7 +342,7 @@ def main() -> None:
         )
         writer.writeheader()
 
-    best_auc = float("-inf")
+    best_score = float("-inf")
     best_ckpt = args.output_dir / "best_model.pt"
     for epoch in range(1, args.epochs + 1):
         train_metrics = run_epoch(
@@ -313,6 +355,7 @@ def main() -> None:
             alpha=args.alpha,
             beta=args.beta,
             amp_enabled=amp_enabled,
+            task=args.task,
         )
         val_metrics = run_epoch(
             model=model,
@@ -324,6 +367,7 @@ def main() -> None:
             alpha=args.alpha,
             beta=args.beta,
             amp_enabled=False,
+            task=args.task,
         )
 
         row = {
@@ -348,21 +392,26 @@ def main() -> None:
             f"val_mae={val_metrics['mae']:.4f}"
         )
 
-        current_auc = val_metrics["auc"]
-        if np.isnan(current_auc):
-            current_auc = float("-inf")
-        if current_auc > best_auc:
-            best_auc = current_auc
+        selection_payload = {
+            "val_auc": val_metrics["auc"],
+            "val_ap": val_metrics["ap"],
+            "val_mae": val_metrics["mae"],
+            "val_loss": val_metrics["loss"],
+        }
+        current_score = metric_sort_value(selection_metric, selection_payload)
+        if current_score > best_score:
+            best_score = current_score
             torch.save(
                 {
                     "model_state_dict": model.state_dict(),
                     "args": vars(args),
                     "epoch": epoch,
                     "val_metrics": val_metrics,
+                    "selection_metric": selection_metric,
                 },
                 best_ckpt,
             )
-            print(f"Saved checkpoint to {best_ckpt}")
+            print(f"Saved checkpoint to {best_ckpt} by {selection_metric}")
 
 
 if __name__ == "__main__":
