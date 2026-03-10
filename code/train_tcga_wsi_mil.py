@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 from sklearn.metrics import average_precision_score, mean_absolute_error, roc_auc_score
 from sklearn.model_selection import StratifiedKFold
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 from torchvision import transforms
 
 from build_tcga_wsi_manifest import build_manifest
@@ -80,6 +80,45 @@ def metric_sort_value(metric_name: str, metrics: dict) -> float:
     if metric_name in {"val_mae", "val_loss"}:
         return -float(value)
     return float(value)
+
+
+class BinaryFocalLossWithLogits(nn.Module):
+    def __init__(self, alpha: float = 0.75, gamma: float = 2.0):
+        super().__init__()
+        self.alpha = float(alpha)
+        self.gamma = float(gamma)
+
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        bce = nn.functional.binary_cross_entropy_with_logits(
+            logits,
+            targets,
+            reduction="none",
+        )
+        probs = torch.sigmoid(logits)
+        pt = torch.where(targets > 0.5, probs, 1.0 - probs)
+        alpha_t = torch.where(
+            targets > 0.5,
+            torch.full_like(targets, self.alpha),
+            torch.full_like(targets, 1.0 - self.alpha),
+        )
+        focal_weight = alpha_t * torch.pow(1.0 - pt, self.gamma)
+        return (focal_weight * bce).mean()
+
+
+def build_train_sampler(train_df: pd.DataFrame, sampler_name: str):
+    if sampler_name != "balanced":
+        return None
+    labels = train_df["hrd_status"].astype(int).to_numpy()
+    class_counts = np.bincount(labels, minlength=2)
+    class_weights = np.zeros_like(class_counts, dtype=np.float64)
+    nonzero = class_counts > 0
+    class_weights[nonzero] = 1.0 / class_counts[nonzero]
+    sample_weights = class_weights[labels]
+    return WeightedRandomSampler(
+        weights=torch.as_tensor(sample_weights, dtype=torch.double),
+        num_samples=len(sample_weights),
+        replacement=True,
+    )
 
 
 def run_epoch(
@@ -223,6 +262,28 @@ def parse_args():
         default="auto",
         choices=["auto", "val_auc", "val_ap", "val_mae", "val_loss"],
     )
+    parser.add_argument(
+        "--classification-loss",
+        type=str,
+        default="bce",
+        choices=["bce", "focal"],
+    )
+    parser.add_argument(
+        "--focal-alpha",
+        type=float,
+        default=0.75,
+    )
+    parser.add_argument(
+        "--focal-gamma",
+        type=float,
+        default=2.0,
+    )
+    parser.add_argument(
+        "--train-sampler",
+        type=str,
+        default="random",
+        choices=["random", "balanced"],
+    )
     parser.add_argument("--cache-dir", type=Path, default=Path("outputs/tile_cache"))
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument("--amp", action="store_true")
@@ -284,9 +345,10 @@ def main() -> None:
     train_loader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
-        shuffle=True,
+        shuffle=args.train_sampler == "random",
         num_workers=args.num_workers,
         pin_memory=args.device.startswith("cuda"),
+        sampler=build_train_sampler(train_df, args.train_sampler),
     )
     val_loader = DataLoader(
         val_dataset,
@@ -316,7 +378,13 @@ def main() -> None:
         dtype=torch.float32,
         device=device,
     )
-    criterion_status = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+    if args.classification_loss == "focal":
+        criterion_status = BinaryFocalLossWithLogits(
+            alpha=args.focal_alpha,
+            gamma=args.focal_gamma,
+        )
+    else:
+        criterion_status = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
     selection_metric = determine_selection_metric(args.task, args.selection_metric)
 
     config_path = args.output_dir / "config.json"

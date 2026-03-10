@@ -684,3 +684,47 @@ Workspace: /Users/gui/Desktop/项目归并_2026-03-07/国自然/2025年度粤港
   - fold 0 had started successfully
   - output directory plus `config.json` / `metrics.csv` were being created normally
   - runner process was alive after launch
+
+## Longer-budget classification-only imbalance-aware probe (2026-03-10)
+
+### Motivation
+- Test whether a longer classification-only run can keep AUC high while improving AP.
+- Add explicit positive-class handling rather than changing backbone again.
+
+### Code support added
+- `code/train_tcga_wsi_mil.py` now supports:
+  - `--classification-loss bce|focal`
+  - `--train-sampler random|balanced`
+
+### Probe run
+- Output dir: `outputs/tcga_wsi_cls_only_tv_resnet50_fold2_ep10_focal_balanced`
+- Fold: 2
+- Backbone: `tv_resnet50`
+- Task: `classification`
+- Epochs: `10`
+- Classification loss: `focal`
+- Train sampler: `balanced`
+
+### Results
+- Best validation AUC:
+  - epoch 1
+  - val_auc: 0.9474
+  - val_ap: 0.2917
+- Later epochs:
+  - AUC recovered partially after the early drop
+  - but never exceeded the epoch-1 checkpoint
+
+### Comparison against the previous classification-only fold-2 baseline
+- Previous best:
+  - val_auc: 0.9605
+  - val_ap: 0.3929
+- New focal + balanced probe best:
+  - val_auc: 0.9474
+  - val_ap: 0.2917
+
+### Interpretation
+- Longer budget plus imbalance-aware optimization did not beat the current best classification-only fold-2 checkpoint.
+- This suggests that:
+  - the current setup is already able to reach a strong classification solution early
+  - extra epochs without better early-stopping control can degrade performance
+  - focal loss plus balanced sampling is not yet a clear upgrade over the simpler classification-only recipe
