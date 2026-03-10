@@ -513,3 +513,27 @@ Workspace: /Users/gui/Desktop/项目归并_2026-03-07/国自然/2025年度粤港
 - The gain is large enough that a full CV rerun with `tv_resnet50` is now justified.
 - Important caveat:
   - HRD score regression MAE got worse on this weak-fold probe, so future runs should track classification and regression separately rather than assuming both improve together.
+
+## Full tv_resnet50 CV rerun launched (2026-03-10)
+
+### Launch status
+- Output root: `outputs/tcga_wsi_cv_tv_resnet50_ep3`
+- Runner:
+  - `tools/run_tcga_cv_folds.sh`
+- Configuration:
+  - folds: `0 1 2 3 4`
+  - backbone: `tv_resnet50`
+  - epochs per fold: `3`
+  - batch size: `1`
+  - workers: `4`
+  - tiles per slide: `16`
+  - pretrained: yes
+  - AMP: yes
+- Pretrained weights:
+  - `torchvision` cache path confirmed:
+    - `/home/ubuntu/.cache/torch/hub/checkpoints/resnet50-11ad3fa6.pth`
+- Runtime log:
+  - `outputs/tcga_wsi_cv_tv_resnet50_ep3/run.log`
+- Status at launch check:
+  - fold 0 had started successfully
+  - output directory and metrics/config files were being created normally
