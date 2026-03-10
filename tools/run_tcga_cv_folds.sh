@@ -10,6 +10,8 @@ BATCH_SIZE="${5:-2}"
 NUM_WORKERS="${6:-4}"
 NUM_TILES="${7:-16}"
 DEVICE="${8:-cuda:0}"
+TASK="${9:-multitask}"
+SELECTION_METRIC="${10:-auto}"
 
 mkdir -p "$ROOT_DIR"
 
@@ -31,6 +33,8 @@ for FOLD in $FOLDS; do
     --target-mag 10 \
     --device "$DEVICE" \
     --fold "$FOLD" \
+    --task "$TASK" \
+    --selection-metric "$SELECTION_METRIC" \
     --pretrained \
     --amp
 done

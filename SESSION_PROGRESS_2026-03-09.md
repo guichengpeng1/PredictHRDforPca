@@ -662,3 +662,25 @@ Workspace: /Users/gui/Desktop/项目归并_2026-03-07/国自然/2025年度粤港
   - selection metric: `val_auc`
 - The next large experiment should therefore be:
   - rerun full CV in classification-only mode
+
+## Full tv_resnet50 classification-only CV launched (2026-03-10)
+
+### Launch status
+- Output root: `outputs/tcga_wsi_cv_tv_resnet50_cls_ep6`
+- Runner:
+  - `tools/run_tcga_cv_folds.sh`
+- Configuration:
+  - folds: `0 1 2 3 4`
+  - backbone: `tv_resnet50`
+  - task: `classification`
+  - selection metric: `val_auc`
+  - epochs per fold: `6`
+  - batch size: `1`
+  - workers: `4`
+  - tiles per slide: `16`
+  - pretrained: yes
+  - AMP: yes
+- Status at launch check:
+  - fold 0 had started successfully
+  - output directory plus `config.json` / `metrics.csv` were being created normally
+  - runner process was alive after launch
