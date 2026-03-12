@@ -1,6 +1,7 @@
 import argparse
 import json
 from pathlib import Path
+from typing import Iterable
 
 import numpy as np
 import pandas as pd
@@ -70,6 +71,25 @@ def parse_args():
         default=None,
         help="Directory to save diagnostic csv/json outputs. Defaults to <run-dir>/diagnostics.",
     )
+    parser.add_argument(
+        "--dataset-seed",
+        type=int,
+        default=None,
+        help="Override the base dataset seed used for deterministic tile sampling.",
+    )
+    parser.add_argument(
+        "--repeats",
+        type=int,
+        default=1,
+        help="Number of repeated deterministic bag samplings to average at inference time.",
+    )
+    parser.add_argument(
+        "--focus-patient",
+        type=str,
+        nargs="*",
+        default=[],
+        help="Optional patient barcodes to highlight in the summary output.",
+    )
     return parser.parse_args()
 
 
@@ -93,7 +113,7 @@ def build_split_dataframe(manifest_df: pd.DataFrame, ckpt_args: dict, split_name
     return val_df
 
 
-def build_dataset(split_df: pd.DataFrame, ckpt_args: dict) -> WSITileBagDataset:
+def build_dataset(split_df: pd.DataFrame, ckpt_args: dict, dataset_seed: int) -> WSITileBagDataset:
     return WSITileBagDataset(
         split_df,
         num_tiles=int(ckpt_args["num_tiles"]),
@@ -103,7 +123,7 @@ def build_dataset(split_df: pd.DataFrame, ckpt_args: dict) -> WSITileBagDataset:
         transform=build_transforms(train=False, image_size=int(ckpt_args["tile_size"])),
         cache_dir=Path(ckpt_args["cache_dir"]),
         training=False,
-        seed=int(ckpt_args["seed"]),
+        seed=int(dataset_seed),
     )
 
 
@@ -143,35 +163,56 @@ def run_inference(
     return pd.DataFrame(rows)
 
 
-def summarize_predictions(pred_df: pd.DataFrame) -> dict:
-    pred_df = pred_df.sort_values("pred_prob", ascending=False).reset_index(drop=True)
+def summarize_predictions(
+    pred_df: pd.DataFrame,
+    prob_col: str,
+    prob_std_col: str | None = None,
+    focus_patients: Iterable[str] | None = None,
+) -> dict:
+    pred_df = pred_df.sort_values(prob_col, ascending=False).reset_index(drop=True)
     pred_df["rank_desc"] = np.arange(1, len(pred_df) + 1)
     positives = pred_df[pred_df["hrd_status"] == 1].copy()
     negatives = pred_df[pred_df["hrd_status"] == 0].copy()
+    focus_patients = list(focus_patients or [])
 
     threshold = 0.5
-    tp = int(((pred_df["hrd_status"] == 1) & (pred_df["pred_prob"] >= threshold)).sum())
-    fn = int(((pred_df["hrd_status"] == 1) & (pred_df["pred_prob"] < threshold)).sum())
-    fp = int(((pred_df["hrd_status"] == 0) & (pred_df["pred_prob"] >= threshold)).sum())
-    tn = int(((pred_df["hrd_status"] == 0) & (pred_df["pred_prob"] < threshold)).sum())
+    tp = int(((pred_df["hrd_status"] == 1) & (pred_df[prob_col] >= threshold)).sum())
+    fn = int(((pred_df["hrd_status"] == 1) & (pred_df[prob_col] < threshold)).sum())
+    fp = int(((pred_df["hrd_status"] == 0) & (pred_df[prob_col] >= threshold)).sum())
+    tn = int(((pred_df["hrd_status"] == 0) & (pred_df[prob_col] < threshold)).sum())
+
+    focus_cols = ["patient_barcode", "slide_path", "rank_desc", prob_col]
+    if prob_std_col is not None and prob_std_col in pred_df.columns:
+        focus_cols.append(prob_std_col)
+    focus_cases = []
+    if focus_patients:
+        focus_df = pred_df[pred_df["patient_barcode"].isin(focus_patients)][focus_cols].copy()
+        for record in focus_df.to_dict(orient="records"):
+            for key, value in list(record.items()):
+                if isinstance(value, (np.floating, float)):
+                    record[key] = float(value)
+                if isinstance(value, (np.integer, int)):
+                    record[key] = int(value)
+            focus_cases.append(record)
 
     return {
         "num_slides": int(len(pred_df)),
         "num_positive": int((pred_df["hrd_status"] == 1).sum()),
         "num_negative": int((pred_df["hrd_status"] == 0).sum()),
-        "auc": safe_auc(pred_df["hrd_status"].to_numpy(), pred_df["pred_prob"].to_numpy()),
-        "ap": safe_ap(pred_df["hrd_status"].to_numpy(), pred_df["pred_prob"].to_numpy()),
-        "pred_prob_mean": float(pred_df["pred_prob"].mean()),
-        "positive_prob_mean": float(positives["pred_prob"].mean()) if not positives.empty else float("nan"),
-        "negative_prob_mean": float(negatives["pred_prob"].mean()) if not negatives.empty else float("nan"),
+        "auc": safe_auc(pred_df["hrd_status"].to_numpy(), pred_df[prob_col].to_numpy()),
+        "ap": safe_ap(pred_df["hrd_status"].to_numpy(), pred_df[prob_col].to_numpy()),
+        "pred_prob_mean": float(pred_df[prob_col].mean()),
+        "positive_prob_mean": float(positives[prob_col].mean()) if not positives.empty else float("nan"),
+        "negative_prob_mean": float(negatives[prob_col].mean()) if not negatives.empty else float("nan"),
         "positive_ranks_desc": positives["rank_desc"].astype(int).tolist(),
-        "positive_probs": [float(x) for x in positives["pred_prob"].tolist()],
+        "positive_probs": [float(x) for x in positives[prob_col].tolist()],
         "top_false_positives": negatives.head(5)[
-            ["patient_barcode", "pred_prob", "rank_desc", "slide_path"]
+            focus_cols
         ].to_dict(orient="records"),
         "positive_cases": positives[
-            ["patient_barcode", "pred_prob", "rank_desc", "slide_path"]
+            focus_cols
         ].to_dict(orient="records"),
+        "focus_cases": focus_cases,
         "threshold_0p5_confusion": {
             "tp": tp,
             "fn": fn,
@@ -179,6 +220,33 @@ def summarize_predictions(pred_df: pd.DataFrame) -> dict:
             "tn": tn,
         },
     }
+
+
+def aggregate_repeat_predictions(pred_dfs: list[pd.DataFrame]) -> pd.DataFrame:
+    combined = pd.concat(pred_dfs, ignore_index=True)
+    group_cols = ["patient_barcode", "slide_path", "hrd_score", "hrd_status"]
+    agg_df = (
+        combined.groupby(group_cols, as_index=False)
+        .agg(
+            pred_score_mean=("pred_score", "mean"),
+            pred_score_std=("pred_score", "std"),
+            pred_logit_mean=("pred_logit", "mean"),
+            pred_logit_std=("pred_logit", "std"),
+            pred_prob_mean=("pred_prob", "mean"),
+            pred_prob_std=("pred_prob", "std"),
+            attention_max_mean=("attention_max", "mean"),
+            attention_max_std=("attention_max", "std"),
+            attention_entropy_mean=("attention_entropy", "mean"),
+            attention_entropy_std=("attention_entropy", "std"),
+        )
+        .sort_values("pred_prob_mean", ascending=False)
+        .reset_index(drop=True)
+    )
+    std_cols = [col for col in agg_df.columns if col.endswith("_std")]
+    agg_df[std_cols] = agg_df[std_cols].fillna(0.0)
+    agg_df["rank_desc"] = np.arange(1, len(agg_df) + 1)
+    agg_df["pred_label_0p5"] = (agg_df["pred_prob_mean"] >= 0.5).astype(int)
+    return agg_df
 
 
 def main() -> None:
@@ -206,28 +274,73 @@ def main() -> None:
         "fold": int(ckpt_args["fold"]),
         "task": str(ckpt_args["task"]),
         "backbone": str(ckpt_args["backbone"]),
+        "dataset_seed_base": int(args.dataset_seed if args.dataset_seed is not None else ckpt_args["seed"]),
+        "repeats": int(args.repeats),
+        "focus_patients": list(args.focus_patient),
         "splits": {},
     }
 
     for split_name in args.split:
         split_df = build_split_dataframe(manifest_df, ckpt_args, split_name)
-        dataset = build_dataset(split_df, ckpt_args)
-        loader = DataLoader(
-            dataset,
-            batch_size=args.batch_size,
-            shuffle=False,
-            num_workers=args.num_workers,
-            pin_memory=device.type == "cuda",
+        dataset_seed_base = int(args.dataset_seed if args.dataset_seed is not None else ckpt_args["seed"])
+        if args.repeats <= 1:
+            dataset = build_dataset(split_df, ckpt_args, dataset_seed_base)
+            loader = DataLoader(
+                dataset,
+                batch_size=args.batch_size,
+                shuffle=False,
+                num_workers=args.num_workers,
+                pin_memory=device.type == "cuda",
+            )
+            pred_df = run_inference(model, loader, device)
+            pred_df = pred_df.sort_values("pred_prob", ascending=False).reset_index(drop=True)
+            pred_df["rank_desc"] = np.arange(1, len(pred_df) + 1)
+
+            pred_path = output_dir / f"{split_name}_predictions.csv"
+            pred_df.to_csv(pred_path, index=False)
+
+            aggregate["splits"][split_name] = summarize_predictions(
+                pred_df,
+                prob_col="pred_prob",
+                focus_patients=args.focus_patient,
+            )
+            aggregate["splits"][split_name]["predictions_csv"] = str(pred_path)
+            continue
+
+        repeat_dfs = []
+        for repeat_idx in range(args.repeats):
+            repeat_seed = dataset_seed_base + repeat_idx
+            dataset = build_dataset(split_df, ckpt_args, repeat_seed)
+            loader = DataLoader(
+                dataset,
+                batch_size=args.batch_size,
+                shuffle=False,
+                num_workers=args.num_workers,
+                pin_memory=device.type == "cuda",
+            )
+            repeat_df = run_inference(model, loader, device)
+            repeat_df["repeat_index"] = repeat_idx
+            repeat_df["repeat_seed"] = repeat_seed
+            repeat_dfs.append(repeat_df)
+
+        combined_df = pd.concat(repeat_dfs, ignore_index=True)
+        combined_path = output_dir / f"{split_name}_predictions_repeats.csv"
+        combined_df.to_csv(combined_path, index=False)
+
+        agg_df = aggregate_repeat_predictions(repeat_dfs)
+        agg_path = output_dir / f"{split_name}_predictions_mean.csv"
+        agg_df.to_csv(agg_path, index=False)
+
+        aggregate["splits"][split_name] = summarize_predictions(
+            agg_df,
+            prob_col="pred_prob_mean",
+            prob_std_col="pred_prob_std",
+            focus_patients=args.focus_patient,
         )
-        pred_df = run_inference(model, loader, device)
-        pred_df = pred_df.sort_values("pred_prob", ascending=False).reset_index(drop=True)
-        pred_df["rank_desc"] = np.arange(1, len(pred_df) + 1)
-
-        pred_path = output_dir / f"{split_name}_predictions.csv"
-        pred_df.to_csv(pred_path, index=False)
-
-        aggregate["splits"][split_name] = summarize_predictions(pred_df)
-        aggregate["splits"][split_name]["predictions_csv"] = str(pred_path)
+        aggregate["splits"][split_name]["repeats"] = int(args.repeats)
+        aggregate["splits"][split_name]["repeat_seed_start"] = dataset_seed_base
+        aggregate["splits"][split_name]["predictions_repeats_csv"] = str(combined_path)
+        aggregate["splits"][split_name]["predictions_mean_csv"] = str(agg_path)
 
     summary_path = output_dir / "summary.json"
     with summary_path.open("w", encoding="utf-8") as handle:
