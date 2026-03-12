@@ -44,10 +44,30 @@ def best_row(metrics_df: pd.DataFrame, metric: str) -> pd.Series:
     return metrics_df.loc[idx]
 
 
+def expand_run_dirs(run_dirs: list[Path]) -> list[Path]:
+    expanded = []
+    seen = set()
+    for run_dir in run_dirs:
+        candidates = []
+        if (run_dir / "metrics.csv").exists():
+            candidates = [run_dir]
+        else:
+            candidates = sorted(
+                path.parent for path in run_dir.glob("fold*/metrics.csv") if path.is_file()
+            )
+        for candidate in candidates:
+            candidate_str = str(candidate)
+            if candidate_str in seen:
+                continue
+            seen.add(candidate_str)
+            expanded.append(candidate)
+    return expanded
+
+
 def main() -> None:
     args = parse_args()
     rows = []
-    for run_dir in args.run_dir:
+    for run_dir in expand_run_dirs(args.run_dir):
         metrics_path = run_dir / "metrics.csv"
         if not metrics_path.exists():
             print(f"SKIP missing metrics: {metrics_path}")

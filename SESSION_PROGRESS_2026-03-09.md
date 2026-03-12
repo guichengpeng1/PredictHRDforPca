@@ -728,3 +728,163 @@ Workspace: /Users/gui/Desktop/项目归并_2026-03-07/国自然/2025年度粤港
   - the current setup is already able to reach a strong classification solution early
   - extra epochs without better early-stopping control can degrade performance
   - focal loss plus balanced sampling is not yet a clear upgrade over the simpler classification-only recipe
+
+## Full tv_resnet50 classification-only CV with longer budget (2026-03-12)
+
+### Configuration
+- Output root: `outputs/tcga_wsi_cv_tv_resnet50_cls_ep10`
+- Model:
+  - backbone: `tv_resnet50`
+  - task: `classification`
+  - selection metric: `val_auc`
+- Training:
+  - folds: `0 1 2 3 4`
+  - epochs per fold: `10`
+  - batch size: `1`
+  - workers: `4`
+  - tiles per slide: `16`
+  - pretrained: yes
+  - AMP: yes
+- Important change versus the previous full classification-only CV:
+  - only the training budget was increased from `6` to `10` epochs
+  - no focal loss
+  - no balanced sampler
+
+### 5-fold summary by best validation AUC
+- fold0:
+  - best epoch: `1`
+  - val_auc: `0.7857`
+  - val_ap: `0.0982`
+- fold1:
+  - best epoch: `1`
+  - val_auc: `0.8618`
+  - val_ap: `0.2955`
+- fold2:
+  - best epoch: `4`
+  - val_auc: `0.4605`
+  - val_ap: `0.0842`
+- fold3:
+  - best epoch: `3`
+  - val_auc: `0.7039`
+  - val_ap: `0.0617`
+- fold4:
+  - best epoch: `3`
+  - val_auc: `0.8816`
+  - val_ap: `0.5500`
+
+### Cross-fold aggregate
+- mean val_auc: `0.7387`
+- std val_auc: `0.1526`
+- mean val_ap: `0.2179`
+- std val_ap: `0.1859`
+
+### Comparison against the previous 6-epoch classification-only CV
+- Previous `outputs/tcga_wsi_cv_tv_resnet50_cls_ep6`:
+  - mean val_auc: `0.7219`
+  - std val_auc: `0.1329`
+  - mean val_ap: `0.0927`
+- New `outputs/tcga_wsi_cv_tv_resnet50_cls_ep10`:
+  - mean val_auc: `0.7387`
+  - std val_auc: `0.1526`
+  - mean val_ap: `0.2179`
+
+### Interpretation
+- A longer classification-only budget improved both cross-fold mean AUC and mean AP.
+- `tv_resnet50 + classification-only + 10 epochs` is now the strongest default HRD classification setting in this workspace.
+- However, fold-level instability remains:
+  - fold2 is still markedly weaker than the other folds
+  - this split needs case-level diagnosis instead of another blind global sweep
+
+## Fold-2 diagnosis after the 10-epoch classification-only CV (2026-03-12)
+
+### Tooling added for diagnosis
+- `code/summarize_tcga_cv.py`
+  - now accepts a CV root directory and automatically expands `fold*/metrics.csv`
+- `code/diagnose_tcga_fold.py`
+  - loads a saved fold checkpoint
+  - rebuilds the exact train/val split
+  - exports per-slide predictions
+  - reports positive-case ranks, top false positives, and threshold-0.5 confusion
+
+### Fold-2 validation-set diagnosis
+- Diagnosed run:
+  - `outputs/tcga_wsi_cv_tv_resnet50_cls_ep10/fold2`
+  - checkpoint epoch: `4`
+- Validation split size:
+  - `78` slides total
+  - `2` positive
+  - `76` negative
+- Validation diagnosis:
+  - val_auc: `0.4605`
+  - val_ap: `0.0842`
+  - positive ranks: `7` and `78`
+  - threshold-0.5 confusion:
+    - TP: `1`
+    - FN: `1`
+    - FP: `8`
+    - TN: `68`
+- Positive slides:
+  - `TCGA-XQ-A8TA`
+    - predicted probability: `0.5462`
+    - rank: `7`
+  - `TCGA-EJ-7330`
+    - predicted probability: `0.0318`
+    - rank: `78`
+- Top false positives in this weak checkpoint:
+  - `TCGA-G9-A9S0`
+    - predicted probability: `0.7759`
+  - `TCGA-J4-A6G1`
+    - predicted probability: `0.7735`
+  - `TCGA-V1-A9O7`
+    - predicted probability: `0.7022`
+  - `TCGA-M7-A71Z`
+    - predicted probability: `0.6503`
+  - `TCGA-M7-A71Y`
+    - predicted probability: `0.5787`
+
+### Fold-2 train-set diagnosis
+- Train split size:
+  - `313` slides total
+  - `8` positive
+  - `305` negative
+- Train diagnosis:
+  - auc: `0.3766`
+  - ap: `0.0349`
+  - positive ranks: `8`, `114`, `138`, `169`, `244`, `276`, `303`, `305`
+  - threshold-0.5 confusion:
+    - TP: `1`
+    - FN: `7`
+    - FP: `28`
+    - TN: `277`
+
+### Comparison against the earlier strong fold-2 checkpoint
+- Comparison run:
+  - `outputs/tcga_wsi_cls_only_tv_resnet50_fold2_ep6`
+  - checkpoint epoch: `4`
+- Same validation split, much stronger result:
+  - val_auc: `0.9605`
+  - val_ap: `0.3929`
+  - positive ranks: `2` and `7`
+  - threshold-0.5 confusion:
+    - TP: `2`
+    - FN: `0`
+    - FP: `7`
+    - TN: `69`
+- The key contrast is the same positive case `TCGA-EJ-7330`:
+  - weak 10-epoch CV fold2 checkpoint:
+    - predicted probability: `0.0318`
+    - rank: `78`
+  - strong earlier fold2 checkpoint:
+    - predicted probability: `0.7750`
+    - rank: `2`
+
+### Diagnostic conclusion
+- Fold 2 is not simply an intrinsically impossible split.
+- The weak `tcga_wsi_cv_tv_resnet50_cls_ep10/fold2` checkpoint is a bad local solution:
+  - it under-ranks positives on the training split as well
+  - it does not merely suffer from a poor validation threshold
+  - it shows optimization instability rather than a pure data-separability limit
+- The next intervention for this fold should focus on training stability and checkpoint robustness, not a new backbone:
+  - repeated seeds
+  - checkpoint ensembling
+  - or stronger early-stopping / model-selection controls
