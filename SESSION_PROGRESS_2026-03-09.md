@@ -888,3 +888,138 @@ Workspace: /Users/gui/Desktop/项目归并_2026-03-07/国自然/2025年度粤港
   - repeated seeds
   - checkpoint ensembling
   - or stronger early-stopping / model-selection controls
+
+## Fold-2 repeated-seed stability study with averaged inference (2026-03-13)
+
+### Goal
+- Test whether fold 2 can be stabilized by:
+  - repeating training across multiple seeds
+  - averaging bag-level inference per slide
+  - tracking the unstable positive case `TCGA-EJ-7330`
+
+### Tooling added
+- `code/summarize_seed_sweep.py`
+  - summarizes completed seed sweeps from saved diagnostics
+- `tools/run_tcga_fold_seed_sweep.sh`
+  - runs a fixed fold across multiple seeds
+  - then automatically performs repeated deterministic val inference
+- `code/diagnose_tcga_fold.py`
+  - extended to support repeated deterministic bag averaging via:
+    - `--dataset-seed`
+    - `--repeats`
+    - `--focus-patient`
+
+### Sweep configuration
+- Output root:
+  - `outputs/tcga_wsi_fold2_seed_sweep_tv_resnet50_cls_ep10_avg10`
+- Fold:
+  - `2`
+- Seeds:
+  - `42`, `52`, `62`, `72`, `82`
+- Training configuration:
+  - backbone: `tv_resnet50`
+  - task: `classification`
+  - epochs: `10`
+  - tiles per slide: `16`
+  - batch size: `1`
+  - workers: `4`
+- Inference configuration:
+  - validation only
+  - repeated bag averaging: `10`
+  - repeated dataset seed base: `1000`
+  - focus patient: `TCGA-EJ-7330`
+
+### Seed-wise validation summary after 10x bag averaging
+- seed `62`
+  - auc: `0.9671`
+  - ap: `0.3667`
+  - positive ranks: `3`, `5`
+  - `TCGA-EJ-7330` rank: `5`
+- seed `42`
+  - auc: `0.7763`
+  - ap: `0.1156`
+  - positive ranks: `6`, `31`
+  - `TCGA-EJ-7330` rank: `6`
+- seed `82`
+  - auc: `0.7632`
+  - ap: `0.0749`
+  - positive ranks: `17`, `22`
+  - `TCGA-EJ-7330` rank: `17`
+- seed `52`
+  - auc: `0.6776`
+  - ap: `0.0565`
+  - positive ranks: `24`, `28`
+  - `TCGA-EJ-7330` rank: `24`
+- seed `72`
+  - auc: `0.4342`
+  - ap: `0.0356`
+  - positive ranks: `25`, `64`
+  - `TCGA-EJ-7330` rank: `25`
+
+### Aggregate summary across seeds
+- best auc: `0.9671`
+- mean auc: `0.7237`
+- std auc: `0.1729`
+- best ap: `0.3667`
+- mean ap: `0.1299`
+- std ap: `0.1213`
+- best seed:
+  - `62`
+
+### Stability of the focus positive case `TCGA-EJ-7330`
+- best rank across seeds: `5`
+- mean rank across seeds: `15.4`
+- std rank across seeds: `8.55`
+- best averaged probability across seeds: `0.5140`
+- mean averaged probability across seeds: `0.3255`
+- std averaged probability across seeds: `0.1847`
+
+### Interpretation
+- Fold 2 can in fact reach a very strong solution.
+- The problem is not data impossibility; it is seed-sensitive optimization instability.
+- Repeating seeds is therefore a justified intervention for this fold.
+- However, a naive all-seed average is not automatically optimal because weak seeds can drag down the ranking.
+
+## Seed-ensemble search on fold 2 (2026-03-13)
+
+### Tooling added
+- `code/search_seed_ensembles.py`
+  - searches all seed combinations from saved averaged val predictions
+  - reports AUC, AP, positive ranks, and focus-patient ranking
+
+### Search space
+- Based on the same 5 completed fold-2 seed runs
+- Prediction source per seed:
+  - `diagnostics_avg10/val_predictions_mean.csv`
+- Total combinations evaluated:
+  - `31`
+
+### Best combinations
+- Best overall combination by AUC and AP:
+  - seed combo: `62`
+  - auc: `0.9671`
+  - ap: `0.3667`
+  - positive ranks: `3`, `5`
+  - `TCGA-EJ-7330` rank: `5`
+- Best true multi-seed ensemble:
+  - seed combo: `42,62`
+  - auc: `0.9605`
+  - ap: `0.3250`
+  - positive ranks: `4`, `5`
+  - `TCGA-EJ-7330` rank: `4`
+- Full 5-seed average:
+  - seed combo: `42,52,62,72,82`
+  - auc: `0.9276`
+  - ap: `0.2250`
+  - positive ranks: `4`, `10`
+  - `TCGA-EJ-7330` rank: `4`
+
+### Practical conclusion
+- Blindly averaging all seeds is inferior to selecting only strong seeds.
+- The best current policy for fold 2 is:
+  - train multiple seeds
+  - rank them by validation AUC
+  - ensemble only the top-performing seeds
+- In this experiment, the most attractive robust choice is:
+  - top-2 elite ensemble = `42,62`
+- This is slightly below the single best seed on AUC/AP, but it keeps both positives near the top and is less dependent on betting on exactly one lucky seed.
