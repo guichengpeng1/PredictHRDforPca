@@ -43,23 +43,33 @@ for SEED in $SEEDS; do
     --pretrained \
     --amp
 
-  /home/ubuntu/miniconda3/envs/starf/bin/python \
-    code/diagnose_tcga_fold.py \
-    --run-dir "$OUT_DIR" \
-    --split val \
-    --device "$DEVICE" \
-    --num-workers 0 \
-    --dataset-seed "$INFERENCE_SEED_BASE" \
-    --repeats "$INFERENCE_REPEATS" \
-    --focus-patient "$FOCUS_PATIENT" \
+  DIAG_ARGS=(
+    /home/ubuntu/miniconda3/envs/starf/bin/python
+    code/diagnose_tcga_fold.py
+    --run-dir "$OUT_DIR"
+    --split val
+    --device "$DEVICE"
+    --num-workers 0
+    --dataset-seed "$INFERENCE_SEED_BASE"
+    --repeats "$INFERENCE_REPEATS"
     --output-dir "$OUT_DIR/diagnostics_avg${INFERENCE_REPEATS}"
+  )
+  if [[ -n "$FOCUS_PATIENT" ]]; then
+    DIAG_ARGS+=(--focus-patient "$FOCUS_PATIENT")
+  fi
+  "${DIAG_ARGS[@]}"
 done
 
-/home/ubuntu/miniconda3/envs/starf/bin/python \
-  code/summarize_seed_sweep.py \
-  --run-root "$ROOT_DIR" \
-  --split val \
-  --diagnostics-subdir "diagnostics_avg${INFERENCE_REPEATS}" \
-  --focus-patient "$FOCUS_PATIENT" \
-  --output-csv "$ROOT_DIR/seed_sweep_summary.csv" \
+SUMMARY_ARGS=(
+  /home/ubuntu/miniconda3/envs/starf/bin/python
+  code/summarize_seed_sweep.py
+  --run-root "$ROOT_DIR"
+  --split val
+  --diagnostics-subdir "diagnostics_avg${INFERENCE_REPEATS}"
+  --output-csv "$ROOT_DIR/seed_sweep_summary.csv"
   --output-json "$ROOT_DIR/seed_sweep_summary.json"
+)
+if [[ -n "$FOCUS_PATIENT" ]]; then
+  SUMMARY_ARGS+=(--focus-patient "$FOCUS_PATIENT")
+fi
+"${SUMMARY_ARGS[@]}"
