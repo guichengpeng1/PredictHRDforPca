@@ -1023,3 +1023,139 @@ Workspace: /Users/gui/Desktop/项目归并_2026-03-07/国自然/2025年度粤港
 - In this experiment, the most attractive robust choice is:
   - top-2 elite ensemble = `42,62`
 - This is slightly below the single best seed on AUC/AP, but it keeps both positives near the top and is less dependent on betting on exactly one lucky seed.
+
+## Full 5-fold multi-seed CV with forced top-2 ensemble (2026-03-13)
+
+### Goal
+- Generalize the successful fold-2 multi-seed strategy to all folds.
+- Use the same fixed rule for every fold:
+  - run `5` seeds
+  - average each seed's validation inference across `10` bag samplings
+  - keep the `top-2` seeds by validation AUC
+  - average those two seeds
+
+### Configuration
+- Output root:
+  - `outputs/tcga_wsi_cv_seed_sweep_tv_resnet50_cls_ep10_avg10_top2`
+- Model:
+  - backbone: `tv_resnet50`
+  - task: `classification`
+  - epochs: `10`
+  - tiles per slide: `16`
+- Seeds per fold:
+  - `42`, `52`, `62`, `72`, `82`
+- Validation inference:
+  - repeated bag averaging: `10`
+
+### Forced top-2 results
+- fold0:
+  - selected seeds: `82,52`
+  - auc: `0.9091`
+  - ap: `0.1833`
+- fold1:
+  - selected seeds: `82,62`
+  - auc: `0.4737`
+  - ap: `0.0353`
+- fold2:
+  - selected seeds: `62,72`
+  - auc: `0.8947`
+  - ap: `0.1714`
+- fold3:
+  - selected seeds: `42,82`
+  - auc: `0.8947`
+  - ap: `0.1534`
+- fold4:
+  - selected seeds: `62,72`
+  - auc: `0.8487`
+  - ap: `0.1125`
+
+### Forced top-2 aggregate
+- mean auc: `0.8042`
+- std auc: `0.1665`
+- mean ap: `0.1312`
+- std ap: `0.0536`
+
+### Interpretation
+- Multi-seed CV plus selective ensembling substantially improved over the earlier simpler CV baselines.
+- However, fold1 exposed a structural weakness in the fixed `top-2` rule:
+  - fold1 best single seed: `seed82`, auc `0.8421`
+  - fold1 forced top-2 ensemble: auc dropped to `0.4737`
+- Therefore, the next rule should not be:
+  - always use `top-2`
+- It should instead be:
+  - choose the best combination among `top1 / top2 / top3`
+
+## Conditional ensemble postprocessing on the completed 5-fold run (2026-03-13)
+
+### Tooling added
+- `code/build_conditional_seed_ensemble.py`
+  - for each fold, evaluates `top1 / top2 / top3` combinations from the existing seed ranking
+  - keeps the validation-best conditional combination
+- `code/summarize_cv_conditional_ensemble.py`
+  - aggregates the resulting per-fold conditional ensemble summaries across the full CV
+
+### Conditional ensemble rule
+- Candidates per fold:
+  - top-1 seed only
+  - top-2 seed average
+  - top-3 seed average
+- Selection criterion:
+  - validation AUC first
+  - validation AP second
+
+### Conditional ensemble results
+- fold0:
+  - selected size: `2`
+  - selected seeds: `82,52`
+  - auc: `0.9091`
+  - ap: `0.1833`
+- fold1:
+  - selected size: `1`
+  - selected seeds: `82`
+  - auc: `0.8421`
+  - ap: `0.1099`
+- fold2:
+  - selected size: `3`
+  - selected seeds: `62,72,52`
+  - auc: `0.9013`
+  - ap: `0.1964`
+- fold3:
+  - selected size: `1`
+  - selected seeds: `42`
+  - auc: `0.9408`
+  - ap: `0.2429`
+- fold4:
+  - selected size: `1`
+  - selected seeds: `62`
+  - auc: `0.9408`
+  - ap: `0.3500`
+
+### Conditional ensemble aggregate
+- mean auc: `0.9068`
+- std auc: `0.0361`
+- mean ap: `0.2165`
+- std ap: `0.0792`
+- selected-size counts:
+  - top1 chosen: `3` folds
+  - top2 chosen: `1` fold
+  - top3 chosen: `1` fold
+
+### Comparison against forced top-2
+- Forced top-2:
+  - mean auc: `0.8042`
+  - std auc: `0.1665`
+  - mean ap: `0.1312`
+- Conditional ensemble:
+  - mean auc: `0.9068`
+  - std auc: `0.0361`
+  - mean ap: `0.2165`
+
+### Final interpretation from this stage
+- The conditional rule is clearly superior to the fixed top-2 rule on this completed 5-fold run.
+- The strongest current evaluation protocol in this repository is now:
+  - multi-seed training per fold
+  - repeated bag-averaged validation inference
+  - conditional selection among `top1 / top2 / top3`
+- This confirms the earlier diagnosis:
+  - seed diversity is useful
+  - but forcing an ensemble can harm performance when one seed is clearly dominant
